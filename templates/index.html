@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PDF Ad Linker</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>PDF Ad Linker</h1>
+      <p class="subtitle">
+        Upload an e-paper PDF. The app finds likely ads, infers URLs, and places clickable links over each ad region.
+      </p>
+
+      <form id="upload-form">
+        <input type="file" id="pdf-file" name="pdf" accept="application/pdf" required />
+        <button type="submit">Process PDF</button>
+      </form>
+
+      <p id="status"></p>
+
+      <section id="results" class="hidden">
+        <h2>Detected URLs</h2>
+        <ul id="link-list"></ul>
+
+        <a id="download-link" download>Download linked PDF</a>
+
+        <h2>Preview</h2>
+        <iframe id="pdf-preview" title="Linked PDF preview"></iframe>
+      </section>
+    </main>
+
+    <script>
+      const form = document.getElementById("upload-form");
+      const statusEl = document.getElementById("status");
+      const resultsEl = document.getElementById("results");
+      const linkListEl = document.getElementById("link-list");
+      const downloadLinkEl = document.getElementById("download-link");
+      const previewEl = document.getElementById("pdf-preview");
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const fileInput = document.getElementById("pdf-file");
+        if (!fileInput.files.length) {
+          statusEl.textContent = "Select a PDF first.";
+          return;
+        }
+
+        statusEl.textContent = "Processing...";
+        resultsEl.classList.add("hidden");
+        linkListEl.innerHTML = "";
+
+        const formData = new FormData();
+        formData.append("pdf", fileInput.files[0]);
+
+        try {
+          const response = await fetch("/process", {
+            method: "POST",
+            body: formData,
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.error || "Unknown error.");
+          }
+
+          const pdfDataUri = `data:application/pdf;base64,${payload.linked_pdf_base64}`;
+          downloadLinkEl.href = pdfDataUri;
+          downloadLinkEl.download = payload.filename || "linked.pdf";
+          previewEl.src = pdfDataUri;
+
+          if (!payload.links.length) {
+            const li = document.createElement("li");
+            li.textContent = "No ad URLs were confidently inferred.";
+            linkListEl.appendChild(li);
+          } else {
+            payload.links.forEach((item) => {
+              const li = document.createElement("li");
+              li.innerHTML = `Page ${item.page}: <a href="${item.url}" target="_blank" rel="noopener noreferrer">${item.url}</a>`;
+              linkListEl.appendChild(li);
+            });
+          }
+
+          statusEl.textContent = `Done. Added ${payload.links.length} links.`;
+          resultsEl.classList.remove("hidden");
+        } catch (error) {
+          statusEl.textContent = `Error: ${error.message}`;
+        }
+      });
+    </script>
+  </body>
+  </html>

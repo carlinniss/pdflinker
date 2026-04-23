@@ -1,0 +1,63 @@
+body {
+  font-family: Arial, sans-serif;
+  background: #f6f8fa;
+  margin: 0;
+  color: #1f2328;
+}
+
+.container {
+  max-width: 980px;
+  margin: 2rem auto;
+  padding: 1rem 1.2rem;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(140, 149, 159, 0.2);
+}
+
+h1,
+h2 {
+  margin: 0 0 0.8rem;
+}
+
+.subtitle {
+  margin-top: 0;
+  color: #57606a;
+}
+
+form {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+button,
+#download-link {
+  border: none;
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  background: #0969da;
+  color: #fff;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+#status {
+  font-weight: 600;
+}
+
+#link-list {
+  padding-left: 1.2rem;
+}
+
+#pdf-preview {
+  width: 100%;
+  height: 75vh;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+}
+
+.hidden {
+  display: none;
+}

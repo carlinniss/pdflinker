@@ -1,0 +1,7 @@
+Flask
+PyMuPDF
+Pillow
+numpy
+rapidocr-onnxruntime
+opencv-python-headless
+zxing-cpp
