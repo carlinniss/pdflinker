@@ -1,0 +1,14 @@
+devserver.err.log
+devserver.out.log
+
+# Local Python environments and caches
+.venv/
+.bundlevenv/
+.codex-pydeps/
+__pycache__/
+*.py[cod]
+
+# Local sample/debug artifacts
+samples/
+page*.png
+api/__pycache__/index.cpython-313.pyc

@@ -57,6 +57,7 @@ HOST_CORRECTIONS = {
     "www.bosmechurchta.ong": "bkame.org",
     "greaterpagetemple.org": "greaterpagetemple.org",
     "esusjubileechurch.org": "www.jesusjubileechurch.org",
+    "wwwjesusjubileechurch.org": "www.jesusjubileechurch.org",
     "truthandlovecc.net": "www.truthandlovecc.net",
     "imlaw.com": "www.imwlaw.com",
     "lasentinel.dbastore": "lasentinel.dbastore.link",
@@ -75,6 +76,9 @@ DEFAULT_BRAND_DOMAINS = {
     "ivie mcneill wyatt purcell diggs": "https://www.imwlaw.com",
     "ivie mcneill wyatt purcell & diggs": "https://www.imwlaw.com",
     "imwlaw": "https://www.imwlaw.com",
+    "bank of america": "https://bofa.com/HomeTeam",
+    "bankofamerica": "https://bofa.com/HomeTeam",
+    "bofa": "https://bofa.com/HomeTeam",
 }
 
 @dataclass
@@ -116,7 +120,16 @@ def is_blocklisted_url(url: str) -> bool:
     host = ""
     m = re.match(r"^https?://([^/]+)", normalize_url(url))
     if m: host = m.group(1).lower()
-    blocked = ("lasentinel.net", "tinel.net", "tvinsider.com", "techweek.com", "maulanakarenga.org", "woodusd.com", "smorrsioo.com")
+    blocked = (
+        "lasentinel.net",
+        "tinel.net",
+        "tvinsider.com",
+        "techweek.com",
+        "maulanakarenga.org",
+        "woodusd.com",
+        "smorrsioo.com",
+        "lyneabell.com",
+    )
     if any(term in host for term in blocked): return True
     if any(host == d or host.endswith("." + d) for d in GENERIC_EMAIL_DOMAINS): return True
     return False
@@ -321,6 +334,45 @@ def infer_url_from_nearby_text(rect: fitz.Rect, url_blocks: List[tuple]) -> Opti
             best_url = url
     return best_url
 
+def expand_qr_to_ad_rect(page: fitz.Page, qr_rect: fitz.Rect) -> fitz.Rect:
+    page_rect = page.rect
+    expanded = fitz.Rect(qr_rect)
+    cta_terms = (
+        "scan", "visit", "sign up", "learn more", "register", "apply", "order",
+        "shop", "buy", "join", "get started", "call to action"
+    )
+    for block in page.get_text("blocks"):
+        block_rect = fitz.Rect(block[:4])
+        text = " ".join((block[4] or "").split())
+        if len(text) < 3:
+            continue
+
+        # Keep the grouping local to the QR's visual column / panel.
+        if block_rect.x0 < qr_rect.x0 - 140 or block_rect.x1 > qr_rect.x1 + 140:
+            continue
+        if block_rect.y0 < qr_rect.y0 - 420 or block_rect.y1 > qr_rect.y1 + 40:
+            continue
+
+        text_lower = text.lower()
+        looks_like_ad_text = (
+            any(term in text_lower for term in cta_terms)
+            or infer_url(text) is not None
+            or len(text) >= 40
+        )
+        if not looks_like_ad_text:
+            continue
+
+        expanded |= block_rect
+
+    pad_x = 28
+    pad_y = 22
+    return fitz.Rect(
+        max(page_rect.x0, expanded.x0 - pad_x),
+        max(page_rect.y0, expanded.y0 - pad_y),
+        min(page_rect.x1, expanded.x1 + pad_x),
+        min(page_rect.y1, expanded.y1 + pad_y),
+    )
+
 def find_ad_candidates(doc: fitz.Document) -> List[AdCandidate]:
     candidates = []
     for page_index, page in enumerate(doc):
@@ -412,7 +464,27 @@ def extract_image_ads_with_ocr(doc: fitz.Document) -> List[AdCandidate]:
                 # Micro-threshold specifically for Page 4
                 threshold = 0.0001 if page_index == 3 else 0.005
                 area_ratio = (rect.width * rect.height) / (page_rect.width * page_rect.height)
-                if area_ratio < threshold: continue
+                if area_ratio < threshold:
+                    # Small QR badges can sit inside otherwise tiny image boxes (for example page promos).
+                    # Give these a lightweight QR pass before dropping by area.
+                    if area_ratio >= 0.001:
+                        try:
+                            tiny_scan = fitz.Rect(
+                                rect.x0,
+                                max(0, rect.y0 - 8),
+                                rect.x1,
+                                min(page_rect.height, rect.y1 + 8),
+                            )
+                            tiny_pix = page.get_pixmap(clip=tiny_scan, dpi=320, alpha=False)
+                            tiny_np = np.frombuffer(tiny_pix.samples, dtype=np.uint8).reshape(
+                                tiny_pix.h, tiny_pix.w, tiny_pix.n
+                            )
+                            tiny_qr_url = infer_url_from_qr(tiny_np)
+                            if tiny_qr_url:
+                                candidates.append(AdCandidate(page_index, rect, 5.9, "QR Code", tiny_qr_url))
+                        except Exception:
+                            pass
+                    continue
 
                 scan_rect = fitz.Rect(rect.x0, max(0, rect.y0 - 25), rect.x1, min(page_rect.height, rect.y1 + 45))
 
@@ -424,7 +496,8 @@ def extract_image_ads_with_ocr(doc: fitz.Document) -> List[AdCandidate]:
 
                     qr_url = infer_url_from_qr(img_np)
                     if qr_url:
-                        candidates.append(AdCandidate(page_index, rect, 6.0, "QR Code", qr_url))
+                        link_rect = expand_qr_to_ad_rect(page, rect)
+                        candidates.append(AdCandidate(page_index, link_rect, 6.0, "QR Code", qr_url))
                         continue
 
                     nearby_text_url = infer_url_from_nearby_text(rect, url_blocks)
