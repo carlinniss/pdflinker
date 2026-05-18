@@ -51,7 +51,17 @@
         <a id="download-link" download>Download linked PDF</a>
 
         <h2>Preview</h2>
-        <iframe id="pdf-preview" title="Linked PDF preview"></iframe>
+        <p class="preview-actions">
+          <a id="open-preview-tab" class="secondary-link hidden" href="#" target="_blank" rel="noopener noreferrer">
+            Open PDF in new tab
+          </a>
+        </p>
+        <div class="preview-panel">
+          <embed id="pdf-preview" type="application/pdf" title="Linked PDF preview" />
+          <p id="preview-empty" class="preview-empty hidden">
+            Preview is not available yet. Process a PDF to generate one.
+          </p>
+        </div>
       </section>
     </main>
 
@@ -64,8 +74,46 @@
       const regenerateBtn = document.getElementById("regenerate-btn");
       const downloadLinkEl = document.getElementById("download-link");
       const previewEl = document.getElementById("pdf-preview");
+      const previewEmptyEl = document.getElementById("preview-empty");
+      const openPreviewTabEl = document.getElementById("open-preview-tab");
 
       let currentPdfFile = null;
+      let previewObjectUrl = null;
+
+      function bytesFromBase64(base64) {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes;
+      }
+
+      function revokePreviewUrl() {
+        if (previewObjectUrl) {
+          URL.revokeObjectURL(previewObjectUrl);
+          previewObjectUrl = null;
+        }
+      }
+
+      function setLinkedPdfPreview(base64, filename) {
+        revokePreviewUrl();
+        if (!base64) {
+          previewEl.removeAttribute("src");
+          previewEmptyEl.classList.remove("hidden");
+          openPreviewTabEl.classList.add("hidden");
+          return;
+        }
+
+        const blob = new Blob([bytesFromBase64(base64)], { type: "application/pdf" });
+        previewObjectUrl = URL.createObjectURL(blob);
+        previewEl.src = previewObjectUrl;
+        downloadLinkEl.href = previewObjectUrl;
+        downloadLinkEl.download = filename || "linked.pdf";
+        openPreviewTabEl.href = previewObjectUrl;
+        openPreviewTabEl.classList.remove("hidden");
+        previewEmptyEl.classList.add("hidden");
+      }
 
       function sourceLabel(source) {
         if (source === "pdf") return "PDF";
@@ -175,10 +223,7 @@
       }
 
       function applyResponse(payload) {
-        const pdfDataUri = `data:application/pdf;base64,${payload.linked_pdf_base64}`;
-        downloadLinkEl.href = pdfDataUri;
-        downloadLinkEl.download = payload.filename || "linked.pdf";
-        previewEl.src = pdfDataUri;
+        setLinkedPdfPreview(payload.linked_pdf_base64, payload.filename);
         renderLinks(payload.links || []);
         statusEl.textContent = `Done. Added ${payload.links.length} links.`;
         resultsEl.classList.remove("hidden");
@@ -230,6 +275,8 @@
         linkRowsEl.appendChild(createLinkRow());
         resultsEl.classList.remove("hidden");
       });
+
+      window.addEventListener("beforeunload", revokePreviewUrl);
 
       regenerateBtn.addEventListener("click", async () => {
         const rows = collectAllFormRows();

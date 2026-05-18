@@ -1,6 +1,8 @@
-# PDF Ad Linker (Vercel + Python)
+# PDF Ad Linker
 
 Upload an e-paper PDF and produce a version with clickable link annotations over ad regions. The app reads URLs that are already embedded in the file, detects additional ads automatically, lets you review and edit every link in a table, and regenerates the PDF with your final URLs.
+
+![PDF Ad Linker web UI](docs/screenshot.png)
 
 ## How it works (end to end)
 
@@ -155,19 +157,6 @@ Defaults do not override pages that already have a link in the uploaded PDF.
 
 4. Open http://127.0.0.1:5000
 
-## Deploy to Vercel
-
-1. Install the Vercel CLI and log in.
-2. From this folder:
-
-   ```bash
-   vercel
-   ```
-
-3. Vercel uses `vercel.json` and deploys `api/index.py` via `@vercel/python`.
-
----
-
 ## Detection quality notes
 
 - Ad detection is heuristic (block size, ad/CTA keywords, URL patterns, image area).
@@ -188,4 +177,4 @@ Defaults do not override pages that already have a link in the uploaded PDF.
 | `brand_domains.json` | Brand → URL mapping |
 | `page_link_defaults.json` | Default URLs by page or section label |
 | `requirements.txt` | Python dependencies |
-| `vercel.json` | Vercel deployment config |
+| `docs/screenshot.png` | README screenshot of the web UI |

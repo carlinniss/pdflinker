@@ -133,11 +133,49 @@ button.small {
   margin-bottom: 1rem;
 }
 
-#pdf-preview {
+.preview-actions {
+  margin: 0 0 0.5rem;
+}
+
+.secondary-link {
+  color: #0969da;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.secondary-link:hover {
+  text-decoration: underline;
+}
+
+.secondary-link.hidden {
+  display: none;
+}
+
+.preview-panel {
   width: 100%;
   height: 75vh;
   border: 1px solid #d0d7de;
   border-radius: 8px;
+  overflow: hidden;
+  background: #f6f8fa;
+}
+
+#pdf-preview {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.preview-empty {
+  margin: 0;
+  padding: 2rem 1rem;
+  text-align: center;
+  color: #57606a;
+}
+
+.preview-empty.hidden {
+  display: none;
 }
 
 .hidden {
