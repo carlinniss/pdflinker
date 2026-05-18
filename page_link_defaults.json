@@ -4,5 +4,9 @@
   },
   "page_labels": {
     "A-5": "https://tomsteyer.com"
+  },
+  "full_page": {
+    "pages": ["5"],
+    "page_labels": ["A-5"]
   }
 }

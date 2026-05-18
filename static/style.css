@@ -52,6 +52,33 @@ button,
   margin-top: 0;
 }
 
+.source-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 0.15rem 0.45rem;
+  background: #eaeef2;
+  color: #424a53;
+}
+
+.source-badge.pdf {
+  background: #ddf4ff;
+  color: #0969da;
+}
+
+.source-badge.detected {
+  background: #fff8c5;
+  color: #6a5a00;
+}
+
+.source-badge.manual {
+  background: #dafbe1;
+  color: #116329;
+}
+
 .table-wrap {
   overflow-x: auto;
   margin-bottom: 1rem;

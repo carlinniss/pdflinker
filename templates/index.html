@@ -10,8 +10,8 @@
     <main class="container">
       <h1>PDF Ad Linker</h1>
       <p class="subtitle">
-        Upload an e-paper PDF. The app finds likely ads, infers URLs, and places clickable links over each ad region.
-        Review detected links below, edit or add URLs (for example page label <code>A-3</code>), then regenerate the PDF.
+        Upload an e-paper PDF. If the file already has link annotations, those URLs are used first.
+        The app also finds likely ads and infers URLs. Review the table below, edit any URL, then regenerate the PDF.
       </p>
 
       <form id="upload-form">
@@ -22,8 +22,9 @@
       <p id="status"></p>
 
       <section id="results" class="hidden">
-        <h2>Detected URLs</h2>
+        <h2>Links</h2>
         <p class="hint">
+          <span class="source-badge pdf">PDF</span> links were read from the uploaded file.
           Edit URLs or add rows by page label (e.g. <code>A-3</code>) or PDF page number, then click regenerate.
         </p>
 
@@ -31,6 +32,7 @@
           <table id="link-table">
             <thead>
               <tr>
+                <th>Source</th>
                 <th>Page label</th>
                 <th>PDF page</th>
                 <th>URL</th>
@@ -65,9 +67,21 @@
 
       let currentPdfFile = null;
 
-      function createLinkRow({ linkId = "", page = "", pageLabel = "", url = "" } = {}) {
+      function sourceLabel(source) {
+        if (source === "pdf") return "PDF";
+        if (source === "manual") return "Manual";
+        return "Detected";
+      }
+
+      function createLinkRow({ linkId = "", page = "", pageLabel = "", url = "", source = "" } = {}) {
         const tr = document.createElement("tr");
         tr.dataset.linkId = linkId;
+
+        const sourceCell = document.createElement("td");
+        const badge = document.createElement("span");
+        badge.className = `source-badge ${source || "detected"}`;
+        badge.textContent = sourceLabel(source);
+        sourceCell.appendChild(badge);
 
         const labelCell = document.createElement("td");
         const labelInput = document.createElement("input");
@@ -102,7 +116,7 @@
         removeBtn.addEventListener("click", () => tr.remove());
         actionCell.appendChild(removeBtn);
 
-        tr.append(labelCell, pageCell, urlCell, actionCell);
+        tr.append(sourceCell, labelCell, pageCell, urlCell, actionCell);
         return tr;
       }
 
@@ -121,6 +135,7 @@
               page: item.page,
               pageLabel: item.page_label || "",
               url: item.url,
+              source: item.source || "detected",
             })
           );
         });
@@ -137,14 +152,26 @@
           const pageLabel = row.querySelector(".page-label-input").value.trim();
           const page = row.querySelector(".page-num-input").value.trim();
 
-          if (linkId) entry.link_id = Number(linkId);
           if (pageLabel) entry.page_label = pageLabel;
           if (page) entry.page = Number(page);
+          if (linkId && !pageLabel && !page) entry.link_id = Number(linkId);
 
           if (!entry.link_id && !entry.page_label && !entry.page) continue;
           overrides.push(entry);
         }
         return overrides;
+      }
+
+      function collectAllFormRows() {
+        const rows = [];
+        for (const row of linkRowsEl.querySelectorAll("tr")) {
+          const url = row.querySelector(".url-input").value.trim();
+          const pageLabel = row.querySelector(".page-label-input").value.trim();
+          const page = row.querySelector(".page-num-input").value.trim();
+          if (!url) continue;
+          rows.push({ url, pageLabel, page });
+        }
+        return rows;
       }
 
       function applyResponse(payload) {
@@ -205,11 +232,18 @@
       });
 
       regenerateBtn.addEventListener("click", async () => {
-        const overrides = collectOverrides();
-        if (!overrides.length) {
-          statusEl.textContent = "Add at least one row with a page label or PDF page number and a URL.";
+        const rows = collectAllFormRows();
+        if (!rows.length) {
+          statusEl.textContent = "Add at least one row with a URL.";
           return;
         }
+        const missingTarget = rows.some((row) => !row.pageLabel && !row.page);
+        if (missingTarget) {
+          statusEl.textContent =
+            "Each row needs a PDF page number or page label (e.g. A-5) so regenerate knows where to place the link.";
+          return;
+        }
+        const overrides = collectOverrides();
         try {
           await processPdf(overrides);
         } catch (error) {
