@@ -47,8 +47,63 @@ button,
   font-weight: 600;
 }
 
-#link-list {
-  padding-left: 1.2rem;
+.hint {
+  color: #57606a;
+  margin-top: 0;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  margin-bottom: 1rem;
+}
+
+#link-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#link-table th,
+#link-table td {
+  border-bottom: 1px solid #d0d7de;
+  padding: 0.45rem 0.5rem;
+  text-align: left;
+  vertical-align: middle;
+}
+
+#link-table input {
+  width: 100%;
+  min-width: 7rem;
+  box-sizing: border-box;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+}
+
+#link-table .url-input {
+  min-width: 16rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+button.secondary {
+  background: #f6f8fa;
+  color: #1f2328;
+  border: 1px solid #d0d7de;
+}
+
+button.small {
+  padding: 0.35rem 0.55rem;
+  font-size: 0.9rem;
+}
+
+#download-link {
+  display: inline-block;
+  margin-bottom: 1rem;
 }
 
 #pdf-preview {

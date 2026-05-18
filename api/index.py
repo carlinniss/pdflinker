@@ -8,7 +8,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 os.environ.setdefault("OPENCV_LOG_LEVEL", "ERROR")
 
@@ -79,6 +79,9 @@ DEFAULT_BRAND_DOMAINS = {
     "bank of america": "https://bofa.com/HomeTeam",
     "bankofamerica": "https://bofa.com/HomeTeam",
     "bofa": "https://bofa.com/HomeTeam",
+    "tom steyer": "https://tomsteyer.com",
+    "tomsteyer": "https://tomsteyer.com",
+    "steyer": "https://tomsteyer.com",
 }
 
 @dataclass
@@ -129,6 +132,7 @@ def is_blocklisted_url(url: str) -> bool:
         "woodusd.com",
         "smorrsioo.com",
         "lyneabell.com",
+        "mtgileadmbcayahoo.com",
     )
     if any(term in host for term in blocked): return True
     if any(host == d or host.endswith("." + d) for d in GENERIC_EMAIL_DOMAINS): return True
@@ -153,7 +157,7 @@ def is_plausible_url(url: str) -> bool:
 def url_is_reachable(url: str, cache: dict) -> bool:
     normalized = normalize_url(url)
     if normalized in cache: return cache[normalized]
-    trusted = ["ladwp", "cedars", "faithdome", "telacu", "cleanla", "lacsd", "cavshate", "imwlaw", "church"]
+    trusted = ["ladwp", "cedars", "faithdome", "telacu", "cleanla", "lacsd", "cavshate", "imwlaw", "church", "tomsteyer"]
     if any(t in normalized.lower() for t in trusted): return True
     m = re.match(r"^https?://([^/]+)", normalized)
     host = m.group(1).lower() if m else ""
@@ -520,6 +524,210 @@ def extract_image_ads_with_ocr(doc: fitz.Document) -> List[AdCandidate]:
                     continue
     return candidates
 
+PRINTED_PAGE_LABEL_PATTERN = re.compile(r"\b([A-Z])-(\d{1,3})\b")
+
+def normalize_page_label(raw: str) -> str:
+    cleaned = raw.strip().upper().replace(" ", "")
+    m = PRINTED_PAGE_LABEL_PATTERN.search(cleaned)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2))}"
+    return cleaned
+
+def load_page_link_defaults() -> List[dict]:
+    path = Path(__file__).resolve().parent.parent / "page_link_defaults.json"
+    defaults = [
+        {"page": 5, "url": "https://tomsteyer.com"},
+        {"page_label": "A-5", "url": "https://tomsteyer.com"},
+    ]
+    if not path.exists():
+        return defaults
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return defaults
+    loaded = []
+    for page_key, url in (data.get("pages") or {}).items():
+        try:
+            loaded.append({"page": int(page_key), "url": normalize_url(url)})
+        except (TypeError, ValueError):
+            continue
+    for label, url in (data.get("page_labels") or {}).items():
+        if isinstance(label, str) and isinstance(url, str):
+            loaded.append({"page_label": normalize_page_label(label), "url": normalize_url(url)})
+    return loaded or defaults
+
+PAGE_LINK_DEFAULTS = load_page_link_defaults()
+
+def merge_link_overrides(user_overrides: List[dict], defaults: List[dict]) -> List[dict]:
+    user_pages = {o["page"] for o in user_overrides if "page" in o}
+    user_labels = {o["page_label"] for o in user_overrides if "page_label" in o}
+    user_ids = {o["link_id"] for o in user_overrides if "link_id" in o}
+    merged = list(user_overrides)
+    for item in defaults:
+        if item.get("link_id") in user_ids:
+            continue
+        if item.get("page") in user_pages:
+            continue
+        if item.get("page_label") in user_labels:
+            continue
+        merged.append(item)
+    return merged
+
+def printed_page_label_from_text(page: fitz.Page) -> Optional[str]:
+    page_rect = page.rect
+    header = page.get_text(
+        "text",
+        clip=fitz.Rect(0, 0, page_rect.width, page_rect.height * 0.14),
+    )
+    m = PRINTED_PAGE_LABEL_PATTERN.search(header)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2))}"
+    m = PRINTED_PAGE_LABEL_PATTERN.search(page.get_text("text")[:800])
+    if m:
+        return f"{m.group(1)}-{int(m.group(2))}"
+    return None
+
+def page_label_for_index(doc: fitz.Document, page_index: int) -> Optional[str]:
+    page = doc[page_index]
+    if hasattr(page, "get_label"):
+        try:
+            label = (page.get_label() or "").strip()
+            if label:
+                return normalize_page_label(label)
+        except Exception:
+            pass
+    return printed_page_label_from_text(page)
+
+def page_labels_by_index(doc: fitz.Document) -> Dict[int, Optional[str]]:
+    return {i: page_label_for_index(doc, i) for i in range(doc.page_count)}
+
+def parse_link_overrides(raw) -> List[dict]:
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(raw, list):
+        return []
+    overrides = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url")
+        if not isinstance(url, str) or not url.strip():
+            continue
+        normalized = normalize_url(url.strip())
+        if not is_plausible_url(normalized):
+            continue
+        override = {"url": normalized}
+        if item.get("link_id") is not None:
+            try:
+                override["link_id"] = int(item["link_id"])
+            except (TypeError, ValueError):
+                pass
+        if item.get("page") is not None:
+            try:
+                override["page"] = int(item["page"])
+            except (TypeError, ValueError):
+                pass
+        if isinstance(item.get("page_label"), str) and item["page_label"].strip():
+            override["page_label"] = normalize_page_label(item["page_label"])
+        overrides.append(override)
+    return overrides
+
+def largest_image_rect_on_page(page: fitz.Page) -> Optional[fitz.Rect]:
+    image_rects = []
+    for img in page.get_images(full=True):
+        image_rects.extend(page.get_image_rects(img[0]))
+    if not image_rects:
+        return None
+    return max(image_rects, key=lambda r: r.width * r.height)
+
+def apply_link_overrides(
+    doc: fitz.Document,
+    candidates: List[AdCandidate],
+    overrides: List[dict],
+    labels_by_index: Dict[int, Optional[str]],
+) -> List[AdCandidate]:
+    if not overrides:
+        return candidates
+
+    by_id = {o["link_id"]: o["url"] for o in overrides if "link_id" in o}
+    by_label = {o["page_label"]: o["url"] for o in overrides if "page_label" in o}
+    by_page = {o["page"]: o["url"] for o in overrides if "page" in o}
+    label_to_page = {
+        label: page_index
+        for page_index, label in labels_by_index.items()
+        if label
+    }
+
+    updated = []
+    for idx, cand in enumerate(candidates, start=1):
+        url = cand.inferred_url
+        label = labels_by_index.get(cand.page_index)
+        if idx in by_id:
+            url = by_id[idx]
+        elif label and label in by_label:
+            url = by_label[label]
+        elif (cand.page_index + 1) in by_page:
+            url = by_page[cand.page_index + 1]
+        else:
+            for page_label, override_url in by_label.items():
+                if label_to_page.get(page_label) == cand.page_index:
+                    url = override_url
+                    break
+        updated.append(
+            AdCandidate(
+                page_index=cand.page_index,
+                rect=cand.rect,
+                score=cand.score,
+                text=cand.text,
+                inferred_url=url,
+            )
+        )
+
+    linked_pages = {c.page_index for c in updated}
+
+    for override in overrides:
+        if "link_id" in override:
+            continue
+        target_label = override.get("page_label")
+        target_page = override.get("page")
+        page_index = None
+        if target_label:
+            for idx, label in labels_by_index.items():
+                if label == target_label:
+                    page_index = idx
+                    break
+        elif target_page is not None and 1 <= target_page <= doc.page_count:
+            page_index = target_page - 1
+        if page_index is None:
+            continue
+
+        if any(c.page_index == page_index for c in candidates):
+            continue
+        if page_index in linked_pages:
+            continue
+
+        rect = largest_image_rect_on_page(doc[page_index])
+        if rect is None:
+            rect = doc[page_index].rect
+        updated.append(
+            AdCandidate(
+                page_index=page_index,
+                rect=rect,
+                score=3.0,
+                text="Manual override",
+                inferred_url=override["url"],
+            )
+        )
+        linked_pages.add(page_index)
+
+    return dedupe_overlapping_candidates(updated)
+
 def dedupe_overlapping_candidates(candidates: List[AdCandidate]) -> List[AdCandidate]:
     candidates = sorted(candidates, key=lambda c: c.score, reverse=True)
     selected = []
@@ -535,17 +743,33 @@ def dedupe_overlapping_candidates(candidates: List[AdCandidate]) -> List[AdCandi
         if not is_overlap: selected.append(cand)
     return sorted(selected, key=lambda c: (c.page_index, c.rect.y0))
 
-def add_links_to_pdf(pdf_bytes: bytes) -> Tuple[bytes, List[dict]]:
+def add_links_to_pdf(pdf_bytes: bytes, overrides: Optional[List[dict]] = None) -> Tuple[bytes, List[dict]]:
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    labels_by_index = page_labels_by_index(doc)
     candidates = dedupe_overlapping_candidates(find_ad_candidates(doc) + extract_image_ads_with_ocr(doc))
+    effective_overrides = merge_link_overrides(overrides or [], PAGE_LINK_DEFAULTS)
+    if effective_overrides:
+        candidates = apply_link_overrides(doc, candidates, effective_overrides, labels_by_index)
     results, cache = [], {}
     print("\n--- LINKING LOG ---")
     for idx, cand in enumerate(candidates, start=1):
         url = cand.inferred_url
-        if url and url_is_reachable(url, cache):
-            print(f"LINKED P{cand.page_index+1}: {url}")
-            doc[cand.page_index].insert_link({"kind": fitz.LINK_URI, "from": cand.rect, "uri": url})
-            results.append({"id": idx, "page": cand.page_index + 1, "url": url, "score": cand.score, "preview_text": cand.text[:100]})
+        if not url:
+            continue
+        skip_reachability = bool(effective_overrides)
+        if not skip_reachability and not url_is_reachable(url, cache):
+            continue
+        label = labels_by_index.get(cand.page_index)
+        print(f"LINKED P{cand.page_index+1} ({label or 'no label'}): {url}")
+        doc[cand.page_index].insert_link({"kind": fitz.LINK_URI, "from": cand.rect, "uri": url})
+        results.append({
+            "id": idx,
+            "page": cand.page_index + 1,
+            "page_label": label,
+            "url": url,
+            "score": cand.score,
+            "preview_text": cand.text[:100],
+        })
     out = io.BytesIO()
     doc.save(out, garbage=4, deflate=True)
     return out.getvalue(), results
@@ -558,8 +782,13 @@ def process_pdf():
     upload = request.files.get("pdf")
     if not upload: return jsonify({"error": "No file"}), 400
     try:
-        linked_pdf, links = add_links_to_pdf(upload.read())
-        return jsonify({"links": links, "linked_pdf_base64": base64.b64encode(linked_pdf).decode("ascii"), "filename": f"linked_{upload.filename}"})
+        overrides = parse_link_overrides(request.form.get("overrides"))
+        linked_pdf, links = add_links_to_pdf(upload.read(), overrides=overrides)
+        return jsonify({
+            "links": links,
+            "linked_pdf_base64": base64.b64encode(linked_pdf).decode("ascii"),
+            "filename": f"linked_{upload.filename}",
+        })
     except Exception as e:
         import traceback
         print(traceback.format_exc())

@@ -11,6 +11,7 @@
       <h1>PDF Ad Linker</h1>
       <p class="subtitle">
         Upload an e-paper PDF. The app finds likely ads, infers URLs, and places clickable links over each ad region.
+        Review detected links below, edit or add URLs (for example page label <code>A-3</code>), then regenerate the PDF.
       </p>
 
       <form id="upload-form">
@@ -22,7 +23,28 @@
 
       <section id="results" class="hidden">
         <h2>Detected URLs</h2>
-        <ul id="link-list"></ul>
+        <p class="hint">
+          Edit URLs or add rows by page label (e.g. <code>A-3</code>) or PDF page number, then click regenerate.
+        </p>
+
+        <div class="table-wrap">
+          <table id="link-table">
+            <thead>
+              <tr>
+                <th>Page label</th>
+                <th>PDF page</th>
+                <th>URL</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="link-rows"></tbody>
+          </table>
+        </div>
+
+        <div class="actions">
+          <button type="button" id="add-row-btn" class="secondary">Add page link</button>
+          <button type="button" id="regenerate-btn">Regenerate PDF with these links</button>
+        </div>
 
         <a id="download-link" download>Download linked PDF</a>
 
@@ -35,9 +57,131 @@
       const form = document.getElementById("upload-form");
       const statusEl = document.getElementById("status");
       const resultsEl = document.getElementById("results");
-      const linkListEl = document.getElementById("link-list");
+      const linkRowsEl = document.getElementById("link-rows");
+      const addRowBtn = document.getElementById("add-row-btn");
+      const regenerateBtn = document.getElementById("regenerate-btn");
       const downloadLinkEl = document.getElementById("download-link");
       const previewEl = document.getElementById("pdf-preview");
+
+      let currentPdfFile = null;
+
+      function createLinkRow({ linkId = "", page = "", pageLabel = "", url = "" } = {}) {
+        const tr = document.createElement("tr");
+        tr.dataset.linkId = linkId;
+
+        const labelCell = document.createElement("td");
+        const labelInput = document.createElement("input");
+        labelInput.type = "text";
+        labelInput.placeholder = "A-3";
+        labelInput.value = pageLabel;
+        labelInput.className = "page-label-input";
+        labelCell.appendChild(labelInput);
+
+        const pageCell = document.createElement("td");
+        const pageInput = document.createElement("input");
+        pageInput.type = "number";
+        pageInput.min = "1";
+        pageInput.placeholder = "#";
+        pageInput.value = page;
+        pageInput.className = "page-num-input";
+        pageCell.appendChild(pageInput);
+
+        const urlCell = document.createElement("td");
+        const urlInput = document.createElement("input");
+        urlInput.type = "url";
+        urlInput.placeholder = "https://example.com/...";
+        urlInput.value = url;
+        urlInput.className = "url-input";
+        urlCell.appendChild(urlInput);
+
+        const actionCell = document.createElement("td");
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.textContent = "Remove";
+        removeBtn.className = "secondary small";
+        removeBtn.addEventListener("click", () => tr.remove());
+        actionCell.appendChild(removeBtn);
+
+        tr.append(labelCell, pageCell, urlCell, actionCell);
+        return tr;
+      }
+
+      function renderLinks(links) {
+        linkRowsEl.innerHTML = "";
+        if (!links.length) {
+          linkRowsEl.appendChild(
+            createLinkRow({ pageLabel: "", page: "", url: "" })
+          );
+          return;
+        }
+        links.forEach((item) => {
+          linkRowsEl.appendChild(
+            createLinkRow({
+              linkId: item.id,
+              page: item.page,
+              pageLabel: item.page_label || "",
+              url: item.url,
+            })
+          );
+        });
+      }
+
+      function collectOverrides() {
+        const overrides = [];
+        for (const row of linkRowsEl.querySelectorAll("tr")) {
+          const url = row.querySelector(".url-input").value.trim();
+          if (!url) continue;
+
+          const entry = { url };
+          const linkId = row.dataset.linkId;
+          const pageLabel = row.querySelector(".page-label-input").value.trim();
+          const page = row.querySelector(".page-num-input").value.trim();
+
+          if (linkId) entry.link_id = Number(linkId);
+          if (pageLabel) entry.page_label = pageLabel;
+          if (page) entry.page = Number(page);
+
+          if (!entry.link_id && !entry.page_label && !entry.page) continue;
+          overrides.push(entry);
+        }
+        return overrides;
+      }
+
+      function applyResponse(payload) {
+        const pdfDataUri = `data:application/pdf;base64,${payload.linked_pdf_base64}`;
+        downloadLinkEl.href = pdfDataUri;
+        downloadLinkEl.download = payload.filename || "linked.pdf";
+        previewEl.src = pdfDataUri;
+        renderLinks(payload.links || []);
+        statusEl.textContent = `Done. Added ${payload.links.length} links.`;
+        resultsEl.classList.remove("hidden");
+      }
+
+      async function processPdf(overrides = null) {
+        if (!currentPdfFile) {
+          statusEl.textContent = "Select a PDF first.";
+          return;
+        }
+
+        statusEl.textContent = overrides ? "Regenerating with your links..." : "Processing...";
+        resultsEl.classList.add("hidden");
+
+        const formData = new FormData();
+        formData.append("pdf", currentPdfFile);
+        if (overrides && overrides.length) {
+          formData.append("overrides", JSON.stringify(overrides));
+        }
+
+        const response = await fetch("/process", {
+          method: "POST",
+          body: formData,
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.error || "Unknown error.");
+        }
+        applyResponse(payload);
+      }
 
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -46,47 +190,32 @@
           statusEl.textContent = "Select a PDF first.";
           return;
         }
-
-        statusEl.textContent = "Processing...";
-        resultsEl.classList.add("hidden");
-        linkListEl.innerHTML = "";
-
-        const formData = new FormData();
-        formData.append("pdf", fileInput.files[0]);
+        currentPdfFile = fileInput.files[0];
 
         try {
-          const response = await fetch("/process", {
-            method: "POST",
-            body: formData,
-          });
-          const payload = await response.json();
-          if (!response.ok) {
-            throw new Error(payload.error || "Unknown error.");
-          }
+          await processPdf();
+        } catch (error) {
+          statusEl.textContent = `Error: ${error.message}`;
+        }
+      });
 
-          const pdfDataUri = `data:application/pdf;base64,${payload.linked_pdf_base64}`;
-          downloadLinkEl.href = pdfDataUri;
-          downloadLinkEl.download = payload.filename || "linked.pdf";
-          previewEl.src = pdfDataUri;
+      addRowBtn.addEventListener("click", () => {
+        linkRowsEl.appendChild(createLinkRow());
+        resultsEl.classList.remove("hidden");
+      });
 
-          if (!payload.links.length) {
-            const li = document.createElement("li");
-            li.textContent = "No ad URLs were confidently inferred.";
-            linkListEl.appendChild(li);
-          } else {
-            payload.links.forEach((item) => {
-              const li = document.createElement("li");
-              li.innerHTML = `Page ${item.page}: <a href="${item.url}" target="_blank" rel="noopener noreferrer">${item.url}</a>`;
-              linkListEl.appendChild(li);
-            });
-          }
-
-          statusEl.textContent = `Done. Added ${payload.links.length} links.`;
-          resultsEl.classList.remove("hidden");
+      regenerateBtn.addEventListener("click", async () => {
+        const overrides = collectOverrides();
+        if (!overrides.length) {
+          statusEl.textContent = "Add at least one row with a page label or PDF page number and a URL.";
+          return;
+        }
+        try {
+          await processPdf(overrides);
         } catch (error) {
           statusEl.textContent = `Error: ${error.message}`;
         }
       });
     </script>
   </body>
-  </html>
+</html>
